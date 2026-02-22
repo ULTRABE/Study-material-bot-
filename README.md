@@ -1,13 +1,13 @@
 # ㅤ𝑅𝑎𝑣𝑒𝑛 𝐺𝑟𝑜𝑢𝑝 ☻︎ — Distributed Multi-Bot Media Processing Platform
 
-Production-grade Telegram multi-tenant bot system with dynamic clone management, premium access control, and high-throughput media processing.
+Production-grade Telegram multi-tenant bot system with dynamic clone management, premium access control, and high-throughput media processing. **No domain or file server required** — processed files are sent directly to users via Telegram.
 
 ---
 
 ## Architecture
 
 ```
-Single Machine, Multi-Process (Railway VPS, 32GB RAM)
+Single Machine, Multi-Process (Railway VPS / any server)
 
 ┌─────────────────────────────────────────────────────┐
 │                   FastAPI Process                    │
@@ -55,9 +55,11 @@ Single Machine, Multi-Process (Railway VPS, 32GB RAM)
 ### Media Processing
 - Direct public media URLs only
 - Blocked: YouTube, Facebook, Instagram, Twitter/X, Reddit, TikTok, and more
-- Pipeline: Detect → Extract → Download → Optimize (ffmpeg) → Deliver
+- Pipeline: Detect → Extract → Download → Optimize (ffmpeg) → **Send directly via Telegram**
 - 20-block live progress bar, updates every 5 seconds
-- Secure token-based download links with 20-minute TTL
+- **No domain required** — files are uploaded directly to Telegram and sent to the user
+- Temp files are automatically deleted after sending
+- Supports video (mp4, mkv, avi, mov, webm), audio (mp3, aac, ogg, flac, wav), and documents
 
 ### Premium System
 - Key generation with configurable duration
@@ -97,9 +99,11 @@ OWNER_ID=your_telegram_user_id
 ADMIN_IDS=your_id,other_admin_id
 REDIS_URL=redis://localhost:6379
 DATABASE_URL=sqlite+aiosqlite:///./raven.db
-BASE_URL=https://your-domain.com
+BASE_URL=https://your-domain.com   # Used for webhook registration only
 PORT=8000
 ```
+
+> **Note:** `BASE_URL` is only needed for Telegram webhook registration. No file serving endpoint is exposed — all media is delivered directly through Telegram's API.
 
 ### 3. Run Locally
 
@@ -113,7 +117,7 @@ python main.py
 1. Create a new Railway project
 2. Add a Redis service
 3. Set all environment variables from `.env.example`
-4. Set `BASE_URL` to your Railway public URL
+4. Set `BASE_URL` to your Railway public URL (for webhook registration)
 5. Deploy — Railway auto-detects the `Dockerfile`
 
 ---
@@ -193,9 +197,10 @@ User sends URL
 ⚙️ Optimizing…
    ████████████████████ 100%
   ↓
-✅ Ready
-   𝐃𝐨𝐰𝐧𝐥𝐨𝐚𝐝 𝐕𝐢𝐝𝐞𝐨
-   ⏳ This file expires in 20 minutes.
+✅ Ready — file sent directly to chat
+   (video/audio/document via Telegram API)
+  ↓
+🗑️ Temp file deleted from server
 ```
 
 ---
@@ -226,14 +231,14 @@ Adjust `MAX_CONCURRENT_JOBS` accordingly.
 
 ```
 /app
-  /api          — FastAPI app, webhook routing, file serving
+  /api          — FastAPI app, webhook routing
   /config       — Settings and environment management
   /handlers     — Mother bot and child bot command handlers
-  /scheduler    — Background maintenance tasks
-  /services     — Redis, database, emoji, user, premium, file services
+  /scheduler    — Background maintenance tasks (file cleanup, disk monitor)
+  /services     — Redis, database, emoji, user, premium services
   /ui           — Message templates, progress engine, keyboards
   /utils        — Fonts, security, helpers
-  /workers      — Media processor, worker pool, job models
+  /workers      — Media processor (ffmpeg), worker pool, job models
 Dockerfile
 main.py
 requirements.txt
@@ -245,10 +250,9 @@ requirements.txt
 ## Security
 
 - Webhook secret token validation (optional)
-- Secure random token generation for download links
 - Admin IDs loaded from environment only (never hardcoded)
-- Token-based file access with automatic expiry
 - Duplicate job detection per user
+- No public file serving endpoint — files go directly through Telegram
 
 ---
 
@@ -273,3 +277,19 @@ Returns:
   }
 }
 ```
+
+---
+
+## Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `fastapi` + `uvicorn` | Web server for webhook handling |
+| `aiogram 3` | Telegram Bot API client |
+| `sqlalchemy` + `aiosqlite` | Async database ORM (SQLite default) |
+| `asyncpg` | PostgreSQL async driver (optional) |
+| `redis` | Queue, cache, session storage |
+| `httpx` | Async HTTP client for media download |
+| `ffmpeg-python` | Media optimization wrapper |
+| `aiofiles` | Async file I/O |
+| `pydantic-settings` | Environment variable management |
