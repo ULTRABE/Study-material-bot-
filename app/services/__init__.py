@@ -4,7 +4,6 @@ from app.services.bot_registry import BotRegistry
 from app.services.emoji_service import EmojiService
 from app.services.user_service import UserService
 from app.services.premium_service import PremiumService
-from app.services.file_service import FileService
 
 __all__ = [
     "RedisService",
@@ -15,5 +14,4 @@ __all__ = [
     "EmojiService",
     "UserService",
     "PremiumService",
-    "FileService",
 ]

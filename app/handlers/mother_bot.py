@@ -17,7 +17,6 @@ from app.services.redis_service import RedisService
 from app.services.bot_registry import BotRegistry
 from app.services.emoji_service import EmojiService, EMOJI_ROLES
 from app.services.premium_service import PremiumService
-from app.services.file_service import FileService
 from app.ui.messages import MessageTemplates
 from app.ui.keyboards import Keyboards
 from app.utils.security import is_valid_bot_token
@@ -33,7 +32,6 @@ def setup_mother_handlers(
     redis_service: RedisService,
     bot_registry: BotRegistry,
     emoji_service: EmojiService,
-    file_service: FileService,
     worker_pool: WorkerPool,
     child_dp_factory,
 ) -> None:
@@ -370,7 +368,7 @@ def setup_mother_handlers(
 
         queues = await redis_service.get_queue_lengths()
         pool_stats = worker_pool.get_stats()
-        disk_stats = await file_service.get_disk_stats()
+        disk_free_gb = get_disk_free_gb(settings.TEMP_DIR)
         emoji_map = await get_emoji_map()
 
         text = MessageTemplates.stats(
@@ -379,7 +377,7 @@ def setup_mother_handlers(
             active_jobs=pool_stats["active_jobs"],
             queue_high=queues["high"],
             queue_normal=queues["normal"],
-            disk_free_gb=disk_stats["free_gb"],
+            disk_free_gb=disk_free_gb,
             bot_count=bot_registry.get_bot_count(),
             emoji_map=emoji_map,
         )

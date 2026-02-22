@@ -4,10 +4,12 @@ Updates every 5 seconds, never appears stuck.
 """
 import asyncio
 import logging
+import os
 from typing import Optional, Dict, Callable, Awaitable
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.types import FSInputFile
 
 from app.ui.messages import MessageTemplates
 from app.config import settings
@@ -96,32 +98,67 @@ class ProgressEngine:
 
     async def finalize_complete(
         self,
-        download_url: str,
+        file_path: str,
         file_size: Optional[str] = None,
     ) -> None:
-        """Update message to show completion with download link."""
-        text = MessageTemplates.complete(download_url, file_size, self.emoji_map)
+        """
+        Delete the progress message and send the processed file directly to the user.
+        """
+        check = self.emoji_map.get("complete", "✅")
+        caption = f"{check} 𝑅𝑒𝑎𝑑𝑦"
+        if file_size:
+            caption += f"\n𝑆𝑖𝑧𝑒  {file_size}"
+
+        # Delete the progress message first
         try:
-            await self.bot.edit_message_text(
+            await self.bot.delete_message(
                 chat_id=self.chat_id,
                 message_id=self.message_id,
-                text=text,
-                parse_mode="HTML",
-                disable_web_page_preview=False,
             )
-        except TelegramBadRequest:
-            # If edit fails, send new message
+        except Exception:
+            pass
+
+        # Send the file directly
+        try:
+            input_file = FSInputFile(file_path)
+            ext = os.path.splitext(file_path)[1].lower()
+            video_exts = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".ts"}
+            audio_exts = {".mp3", ".aac", ".ogg", ".flac", ".wav", ".m4a"}
+
+            if ext in video_exts:
+                await self.bot.send_video(
+                    chat_id=self.chat_id,
+                    video=input_file,
+                    caption=caption,
+                    parse_mode="HTML",
+                    supports_streaming=True,
+                )
+            elif ext in audio_exts:
+                await self.bot.send_audio(
+                    chat_id=self.chat_id,
+                    audio=input_file,
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+            else:
+                await self.bot.send_document(
+                    chat_id=self.chat_id,
+                    document=input_file,
+                    caption=caption,
+                    parse_mode="HTML",
+                )
+        except Exception as e:
+            logger.error(f"Failed to send file to user: {e}")
+            # Fallback: send error message
             try:
+                error_icon = self.emoji_map.get("error", "❌")
                 await self.bot.send_message(
                     chat_id=self.chat_id,
-                    text=text,
+                    text=f"{error_icon} 𝐹𝑎𝑖𝑙𝑒𝑑 𝑡𝑜 𝑠𝑒𝑛𝑑 𝑓𝑖𝑙𝑒: {str(e)[:200]}",
                     parse_mode="HTML",
-                    disable_web_page_preview=False,
                 )
-            except Exception as e:
-                logger.error(f"Failed to send completion message: {e}")
-        except Exception as e:
-            logger.error(f"Failed to finalize progress: {e}")
+            except Exception:
+                pass
 
     async def finalize_error(self, reason: str) -> None:
         """Update message to show error."""

@@ -4,6 +4,7 @@ Handles URL detection, processing pipeline, /auth for groups.
 """
 import asyncio
 import logging
+import os
 from typing import Optional
 
 from aiogram import Dispatcher, Router, Bot, F
@@ -15,7 +16,6 @@ from app.services.database import DatabaseService
 from app.services.redis_service import RedisService
 from app.services.emoji_service import EmojiService
 from app.services.user_service import UserService
-from app.services.file_service import FileService
 from app.ui.messages import MessageTemplates
 from app.ui.progress import ProgressEngine
 from app.workers.job_models import ProcessingJob, JobStatus
@@ -37,7 +37,6 @@ def setup_child_handlers(
     db_factory,
     redis_service: RedisService,
     emoji_service: EmojiService,
-    file_service: FileService,
     worker_pool: WorkerPool,
 ) -> None:
     """Register all child bot handlers."""
@@ -153,8 +152,8 @@ def setup_child_handlers(
             return
 
         # Check disk space
-        if not file_service.has_sufficient_disk_space():
-            free_gb = get_disk_free_gb(settings.TEMP_DIR)
+        free_gb = get_disk_free_gb(settings.TEMP_DIR)
+        if free_gb < settings.MIN_FREE_DISK_GB:
             await message.answer(
                 MessageTemplates.disk_low_warning(free_gb, emoji_map),
                 parse_mode="HTML",
@@ -162,6 +161,8 @@ def setup_child_handlers(
             return
 
         # Ensure user exists
+        is_premium = False
+        is_banned = False
         async for session in db_factory():
             db = DatabaseService(session)
             await db.get_or_create_user(
@@ -170,7 +171,8 @@ def setup_child_handlers(
                 first_name=user.first_name,
             )
             is_premium = await db.is_user_premium(user.id)
-            is_banned = (await db.get_user(user.id)).is_banned if await db.get_user(user.id) else False
+            user_obj = await db.get_user(user.id)
+            is_banned = user_obj.is_banned if user_obj else False
             break
 
         if is_banned:
@@ -277,7 +279,6 @@ def setup_child_handlers(
                 db_factory,
                 redis_service,
                 emoji_service,
-                file_service,
             ),
         )
 
@@ -287,7 +288,6 @@ def setup_child_handlers(
         db_factory,
         redis_service: RedisService,
         emoji_service: EmojiService,
-        file_service: FileService,
     ) -> None:
         """Execute the full media processing pipeline for a job."""
         emoji_map = await emoji_service.get_all_assigned()
@@ -314,18 +314,16 @@ def setup_child_handlers(
             if output_file is None:
                 raise ValueError("Processing returned no output file.")
 
-            # Create download link
-            file_size_bytes = file_service.get_file_size(output_file)
+            # Get file size for caption
+            file_size_bytes = 0
+            try:
+                file_size_bytes = os.path.getsize(output_file)
+            except OSError:
+                pass
             file_size_str = format_file_size(file_size_bytes) if file_size_bytes > 0 else None
 
-            download_url = await file_service.create_download_link(
-                file_path=output_file,
-                user_id=job.user_id,
-                ttl=settings.LINK_TTL_SECONDS,
-            )
-
-            # Update progress to complete
-            await progress.finalize_complete(download_url, file_size_str)
+            # Send file directly to user via Telegram
+            await progress.finalize_complete(output_file, file_size_str)
 
             # Log download
             async for session in db_factory():
@@ -374,5 +372,13 @@ def setup_child_handlers(
             # Always clean up tracking
             await redis_service.decrement_active_jobs(job.user_id)
             await redis_service.unmark_job_processing(job.user_id, job.url)
+
+            # Clean up temp file after sending
+            if output_file and os.path.exists(output_file):
+                try:
+                    os.remove(output_file)
+                    logger.debug(f"Cleaned up temp file: {output_file}")
+                except OSError:
+                    pass
 
     dp.include_router(router)

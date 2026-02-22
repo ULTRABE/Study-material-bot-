@@ -3,11 +3,13 @@ Scheduler: background tasks for TTL cleanup, expiry checks, disk monitoring.
 """
 import asyncio
 import logging
+import os
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
 from app.config import settings
-from app.utils.helpers import get_disk_free_gb
+from app.utils.helpers import get_disk_free_gb, ensure_dir
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +34,11 @@ class Scheduler:
         self._running = False
         self._tasks: list = []
         self._redis_service = None
-        self._file_service = None
         self._db_service_factory = None
 
-    def configure(self, redis_service, file_service, db_session_factory) -> None:
+    def configure(self, redis_service, db_session_factory) -> None:
         """Configure scheduler with service dependencies."""
         self._redis_service = redis_service
-        self._file_service = file_service
         self._db_service_factory = db_session_factory
 
     async def start(self) -> None:
@@ -74,15 +74,37 @@ class Scheduler:
         while self._running:
             try:
                 await asyncio.sleep(300)  # 5 minutes
-                if self._file_service:
-                    deleted = await self._file_service.cleanup_expired_files()
-                    if deleted > 0:
-                        logger.info(f"File cleanup: removed {deleted} expired files")
+                deleted = await self._cleanup_temp_files()
+                if deleted > 0:
+                    logger.info(f"File cleanup: removed {deleted} expired files")
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"File cleanup error: {e}")
                 await asyncio.sleep(60)
+
+    async def _cleanup_temp_files(self) -> int:
+        """Scan temp directory and remove files older than max TTL."""
+        deleted = 0
+        max_age = settings.LINK_TTL_MAX_SECONDS + 300  # Extra buffer
+
+        try:
+            ensure_dir(settings.TEMP_DIR)
+            for filename in os.listdir(settings.TEMP_DIR):
+                file_path = os.path.join(settings.TEMP_DIR, filename)
+                if not os.path.isfile(file_path):
+                    continue
+                try:
+                    age = os.path.getmtime(file_path)
+                    if time.time() - age > max_age:
+                        os.remove(file_path)
+                        deleted += 1
+                except OSError:
+                    pass
+        except OSError as e:
+            logger.error(f"Cleanup scan error: {e}")
+
+        return deleted
 
     async def _disk_monitor_loop(self) -> None:
         """
@@ -100,8 +122,7 @@ class Scheduler:
                         f"(threshold: {settings.MIN_FREE_DISK_GB} GB)"
                     )
                     # Force cleanup
-                    if self._file_service:
-                        await self._file_service.cleanup_expired_files()
+                    await self._cleanup_temp_files()
                 elif free_gb < settings.MIN_FREE_DISK_GB * 2:
                     logger.info(f"Disk space warning: {free_gb:.2f} GB free")
 
