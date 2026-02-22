@@ -22,4 +22,4 @@ httpx==0.28.1
 ffmpeg-python==0.2.0
 
 # Utilities
-python-multipart==0.0.20
+aiofiles==24.1.0

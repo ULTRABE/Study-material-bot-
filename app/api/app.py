@@ -1,5 +1,5 @@
 """
-FastAPI application: webhook routing, file serving, health checks.
+FastAPI application: webhook routing, health checks.
 Handles all incoming Telegram webhook updates and routes them to the correct bot.
 """
 import logging
@@ -8,14 +8,13 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Request, Response, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.services.database import init_db, get_db, DatabaseService
 from app.services.redis_service import get_redis, RedisService
 from app.services.bot_registry import bot_registry
 from app.services.emoji_service import EmojiService
-from app.services.file_service import FileService
 from app.workers.pool import get_worker_pool
 from app.scheduler import get_scheduler
 from app.utils.helpers import ensure_dir
@@ -48,7 +47,6 @@ async def lifespan(app: FastAPI):
     # Store services in app state
     app.state.redis_service = redis_service
     app.state.emoji_service = EmojiService(redis_service)
-    app.state.file_service = FileService(redis_service)
 
     # Initialize worker pool
     worker_pool = get_worker_pool()
@@ -60,7 +58,6 @@ async def lifespan(app: FastAPI):
     scheduler = get_scheduler()
     scheduler.configure(
         redis_service=redis_service,
-        file_service=app.state.file_service,
         db_session_factory=get_db,
     )
     await scheduler.start()
@@ -128,11 +125,10 @@ async def _setup_mother_bot(app: FastAPI) -> None:
         app.state.redis_service,
         bot_registry,
         app.state.emoji_service,
-        app.state.file_service,
         app.state.worker_pool,
         child_dp_factory=lambda dp, bot: _setup_child_dp(
             dp, app.state.redis_service, app.state.emoji_service,
-            app.state.file_service, app.state.worker_pool,
+            app.state.worker_pool,
         ),
     )
 
@@ -184,7 +180,6 @@ async def _load_child_bots(app: FastAPI) -> None:
                 child_dp,
                 app.state.redis_service,
                 app.state.emoji_service,
-                app.state.file_service,
                 app.state.worker_pool,
             )
             bot_registry.register_child(bot_model.token, child_bot, child_dp)
@@ -200,7 +195,6 @@ def _setup_child_dp(
     dp: "Dispatcher",
     redis_service: RedisService,
     emoji_service: EmojiService,
-    file_service: FileService,
     worker_pool,
 ) -> None:
     """Configure a child bot dispatcher with all handlers."""
@@ -208,7 +202,7 @@ def _setup_child_dp(
     from app.handlers.common import setup_common_handlers
 
     setup_common_handlers(dp, get_db, redis_service, emoji_service)
-    setup_child_handlers(dp, get_db, redis_service, emoji_service, file_service, worker_pool)
+    setup_child_handlers(dp, get_db, redis_service, emoji_service, worker_pool)
 
 
 def create_app() -> FastAPI:
@@ -249,53 +243,8 @@ def create_app() -> FastAPI:
         except Exception as e:
             logger.error(f"Webhook processing error: {e}")
             # Return 200 to prevent Telegram from retrying
-        
+
         return Response(status_code=200)
-
-    # ─── File Serving ─────────────────────────────────────────────────────────
-
-    @app.get("/file/{token}")
-    async def serve_file(token: str, request: Request) -> Response:
-        """Serve a temporary file by its secure token."""
-        file_service: FileService = request.app.state.file_service
-
-        file_path = await file_service.resolve_download_token(token)
-        if file_path is None:
-            raise HTTPException(
-                status_code=404,
-                detail="File not found or link has expired.",
-            )
-
-        if not os.path.exists(file_path):
-            await file_service.invalidate_token(token)
-            raise HTTPException(status_code=404, detail="File no longer available.")
-
-        # Determine media type
-        ext = os.path.splitext(file_path)[1].lower()
-        media_type_map = {
-            ".mp4": "video/mp4",
-            ".mkv": "video/x-matroska",
-            ".avi": "video/x-msvideo",
-            ".mov": "video/quicktime",
-            ".webm": "video/webm",
-            ".mp3": "audio/mpeg",
-            ".aac": "audio/aac",
-            ".ogg": "audio/ogg",
-            ".flac": "audio/flac",
-            ".wav": "audio/wav",
-        }
-        media_type = media_type_map.get(ext, "application/octet-stream")
-        filename = os.path.basename(file_path)
-
-        return FileResponse(
-            path=file_path,
-            media_type=media_type,
-            filename=filename,
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-            },
-        )
 
     # ─── Health Check ─────────────────────────────────────────────────────────
 

@@ -29,8 +29,7 @@ class Settings(BaseSettings):
 
     # File Settings
     TEMP_DIR: str = "/tmp/raven_media"
-    LINK_TTL_SECONDS: int = 1200  # 20 minutes
-    LINK_TTL_MAX_SECONDS: int = 1800  # 30 minutes
+    LINK_TTL_MAX_SECONDS: int = 1800  # 30 minutes (used for cleanup only)
     MIN_FREE_DISK_GB: float = 2.0
 
     # Processing
@@ -64,10 +63,6 @@ class Settings(BaseSettings):
     @property
     def webhook_url(self) -> str:
         return f"{self.BASE_URL}/webhook"
-
-    @property
-    def file_serve_url(self) -> str:
-        return f"{self.BASE_URL}/file"
 
 
 settings = Settings()

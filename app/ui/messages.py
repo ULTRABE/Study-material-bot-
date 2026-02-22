@@ -2,7 +2,6 @@
 Message templates using Raven font styling.
 All UI text uses Unicode mathematical fonts, no ASCII borders.
 """
-from datetime import datetime, timezone
 from typing import Optional, Dict
 
 from app.utils.fonts import RavenFont
@@ -53,20 +52,12 @@ class MessageTemplates:
 
     @staticmethod
     def complete(
-        download_url: str,
         file_size: Optional[str],
         emoji_map: Dict[str, str],
     ) -> str:
         check = emoji_map.get("complete", "✅")
-        clock = emoji_map.get("clock", "⏳")
-        link_text = RavenFont.download_link_text()
         size_line = f"\n𝑆𝑖𝑧𝑒  {file_size}" if file_size else ""
-        return (
-            f"{check} 𝑅𝑒𝑎𝑑𝑦{size_line}\n\n"
-            f'<a href="{download_url}">{link_text}</a>\n\n'
-            f"{clock} 𝑇ℎ𝑖𝑠 𝑓𝑖𝑙𝑒 𝑒𝑥𝑝𝑖𝑟𝑒𝑠 𝑖𝑛 20 𝑚𝑖𝑛𝑢𝑡𝑒𝑠.\n"
-            f"𝐷𝑜𝑤𝑛𝑙𝑜𝑎𝑑 𝑎𝑛𝑑 𝑘𝑒𝑒𝑝 𝑖𝑡 𝑠𝑎𝑓𝑒."
-        )
+        return f"{check} 𝑅𝑒𝑎𝑑𝑦{size_line}"
 
     @staticmethod
     def error(reason: str, emoji_map: Dict[str, str]) -> str:
